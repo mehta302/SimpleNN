@@ -2,9 +2,10 @@ from tensor import Tensor, TensorShape
 from algorithm import vectorize, parallelize
 from random import seed, random_si64
 from math import exp
+from sys import simdwidthof
 alias float = DType.float32
 
-# Loads a 2-d float32 tensor with data from a given csv file path 
+# Loads a 2-d float32 tensor with data from a given csv file path
 fn load_csv(path: String) raises -> Tensor[float]:
   var container: Tensor[float]
   var lines: List[String]
@@ -23,7 +24,7 @@ fn load_csv(path: String) raises -> Tensor[float]:
       elements = lines[i].split(",")
       for j in range(COLS):
         container[((COLS * i) + j)] = atol(elements[j])
- 
+
   return container
 
 # Convert coordinate list to index value
@@ -45,7 +46,7 @@ fn Coordinate(dimensions: List[Int], idx: Int) -> List[Int]:
 
   for i in dimensions:
     div *= i[]
-  
+
   for i in dimensions:
     div /= i[]
     nums.append(index // div)
@@ -62,7 +63,7 @@ fn tensor_transpose[type: DType, dim1: Int, dim2: Int](container: Tensor[type]) 
 
   for i in range(container.shape().rank()):
     original_shape.append(container.dim(i))
-  
+
   new_shape = original_shape
   new_shape[dim1], new_shape[dim2] = new_shape[dim2], new_shape[dim1]
 
@@ -72,7 +73,7 @@ fn tensor_transpose[type: DType, dim1: Int, dim2: Int](container: Tensor[type]) 
     coordinates = Coordinate(original_shape, i)
     coordinates[dim1], coordinates[dim2] = coordinates[dim2], coordinates[dim1]
     output[Index(new_shape, coordinates)] = container[i]
-  
+
   return output
 
 
@@ -100,7 +101,7 @@ fn tensor_exp[type: DType](container: Tensor[type]) -> Tensor[type]:
   @parameter
   fn vec_exp[simd_width: Int](idx: Int) -> None:
     exp_container.store[width=simd_width](idx, exp(container.load[width=simd_width](idx)))
-  
+
   vectorize[vec_exp, type_width](container.num_elements())
   return exp_container
 
@@ -116,9 +117,9 @@ fn tensor_sum[type: DType](container: Tensor[type]) -> Tensor[type]:
     @parameter
     fn vec_add[simd_width: Int](idx: Int) -> None:
       output[i] += container.load[width=simd_width]((COLS*i)+idx).reduce_add()
-    vectorize[vec_add, type_width](COLS) 
+    vectorize[vec_add, type_width](COLS)
   parallelize[calc_row](ROWS, ROWS)
-  
+
   return output
 
 fn tensor_sum1[type: DType](container: Tensor[type]) -> Tensor[type]:
@@ -131,7 +132,7 @@ fn tensor_sum1[type: DType](container: Tensor[type]) -> Tensor[type]:
   fn calc_col(i: Int) -> None:
     @parameter
     fn vec_add[simd_width: Int](idx: Int) -> None:
-      output.store[width=simd_width](idx, 
+      output.store[width=simd_width](idx,
         output.load[width=simd_width](idx) + container.load[width=simd_width]((COLS*i)+idx)
       )
     vectorize[vec_add, type_width](COLS)
@@ -151,7 +152,7 @@ fn add_bias[type: DType](container: Tensor[type], bias: Tensor[type]) -> Tensor[
     @parameter
     fn add[simd_width: Int](j: Int):
       output.store[width=simd_width](i*COLS+j, container.load[width=simd_width](i*COLS+j) + bias[i])
-    vectorize[add, type_width](COLS) 
+    vectorize[add, type_width](COLS)
   parallelize[calc_row](ROWS, ROWS)
 
   return output
@@ -168,7 +169,7 @@ fn div_bias[type: DType](container: Tensor[type], bias: Tensor[type]) -> Tensor[
     @parameter
     fn add[simd_width: Int](j: Int):
       output.store[width=simd_width](i*COLS+j, container.load[width=simd_width](i*COLS+j) / bias[i])
-    vectorize[add, type_width](COLS) 
+    vectorize[add, type_width](COLS)
   parallelize[calc_row](ROWS, ROWS)
 
   return output
@@ -184,7 +185,7 @@ fn div_bias1[type: DType](container: Tensor[type], bias: Tensor[type]) -> Tensor
     @parameter
     fn add[simd_width: Int](j: Int):
       output.store[width=simd_width](i*COLS+j, container.load[width=simd_width](i*COLS+j) / bias.load[width=simd_width](j))
-    vectorize[add, type_width](COLS) 
+    vectorize[add, type_width](COLS)
   parallelize[calc_row](ROWS, ROWS)
 
   return output
@@ -205,7 +206,7 @@ fn matmul[type: DType](lhs: Tensor[type], rhs: Tensor[type]) -> Tensor[type]:
         output.store[width=simd_width](m*N+n,
           rhs.load[width=simd_width](k*N+n).fma(
             lhs[m*K+k], output.load[width=simd_width](m*N+n)
-          ) 
+          )
         )
       vectorize[dot, type_width](N)
   parallelize[calc_row](M, M)
@@ -213,12 +214,12 @@ fn matmul[type: DType](lhs: Tensor[type], rhs: Tensor[type]) -> Tensor[type]:
   return output
 
 # SIMD copy values from one tensor to another at a given offset
-fn copy[type: DType](owned to: TensorShape, of: Tensor[type], offset: Int) -> Tensor[type]:
+fn copy[type: DType, normalize: Int = 1](owned to: TensorShape, of: Tensor[type], offset: Int) -> Tensor[type]:
   alias type_width: IntLiteral = simdwidthof[type]()
   var output: Tensor[type] = Tensor[type](to)
   @parameter
   fn store[simd_width: Int](idx: Int):
-    output.store[width=simd_width](idx, of.load[width=simd_width](idx+offset))
+    output.store[width=simd_width](idx, of.load[width=simd_width](idx+offset) / normalize)
   vectorize[store, type_width](to.num_elements())
 
   return output
